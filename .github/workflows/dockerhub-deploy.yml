@@ -14,10 +14,10 @@ on:
         default: "dev"
 
 jobs:
-  initialize_worker:
+  initialize_runner:
     runs-on: ubuntu-latest
     outputs:
-      runpod_job_id: ${{ steps.extract_id.outputs.runpod_job_id }}
+      id: ${{ steps.extract_id.outputs.runpod_job_id }}
 
     steps:
       - name: Deploy Worker
@@ -28,17 +28,17 @@ jobs:
           method: "POST"
           customHeaders: '{"Content-Type": "application/json"}'
           bearerToken: ${{ secrets.RUNPOD_API_KEY }}
-          data: '{"input":{"github_pat": "${{ secrets.GH_PAT }}", "github_org":"${{ github.repository_owner }}", "docker_image": "your-docker-image:latest"}}'
+          data: '{"input":{"github_pat": "${{ secrets.GH_PAT }}", "github_org":"${{ github.repository_owner }}"}}'
 
       - name: Extract Job ID
         id: extract_id
         run: |
           ID=$(echo '${{ steps.deploy.outputs.response }}' | jq -r '.id')
-          echo "runpod_job_id=$ID" >> $GITHUB_ENV
+          echo "::set-output name=runpod_job_id::$ID"
 
   docker-build:
     needs: initialize_worker
-    runs-on: [self-hosted, runpod]
+    runs-on: [self-hosted, runpod]  # Corrected to include the label directly in runs-on
 
     steps:
       - name: Checkout Code
@@ -56,7 +56,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build and push Docker image to Docker Hub
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
         with:
@@ -66,7 +65,7 @@ jobs:
 
   docker-test:
     needs: [docker-build, initialize_worker]
-    runs-on: [self-hosted, runpod]
+    runs-on: [self-hosted, runpod]  # Corrected to include the label directly in runs-on
 
     steps:
       - name: Checkout Code
@@ -94,9 +93,9 @@ jobs:
               exit 1
           fi
 
-  terminate_worker:
+  terminate_runner:
     if: always()
-    needs: [docker-build, docker-test, initialize_worker]
+    needs: [run_tests, initialize_runner]
     runs-on: ubuntu-latest
 
     steps:
@@ -104,7 +103,7 @@ jobs:
         id: get_status
         uses: fjogeleit/http-request-action@v1
         with:
-          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/status/${{ env.runpod_job_id }}"
+          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/status/${{ needs.initialize_runner.outputs.id }}"
           method: "GET"
           customHeaders: '{"Content-Type": "application/json"}'
           bearerToken: ${{ secrets.RUNPOD_API_KEY }}
@@ -113,13 +112,13 @@ jobs:
         id: parse_status
         run: |
           STATUS=$(echo '${{ steps.get_status.outputs.response }}' | jq -r '.status')
-          echo "status=$STATUS" >> $GITHUB_ENV
+          echo "::set-output name=status::$STATUS"
 
       - name: Shutdown Worker
-        if: ${{ env.status != 'COMPLETED' }}
+        if: ${{ steps.parse_status.outputs.status != 'COMPLETED' }}
         uses: fjogeleit/http-request-action@v1
         with:
-          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/cancel/${{ env.runpod_job_id }}"
+          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/cancel/${{ needs.initialize_runner.outputs.id }}"
           method: "POST"
           customHeaders: '{"Content-Type": "application/json"}'
           bearerToken: ${{ secrets.RUNPOD_API_KEY }}
