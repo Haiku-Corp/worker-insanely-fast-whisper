@@ -38,7 +38,8 @@ jobs:
 
   docker-build:
     needs: initialize_worker
-    runs-on: runpod
+    runs-on: self-hosted
+    labels: [runpod]  # Ensure the worker is identified with this label
 
     steps:
       - name: Checkout Code
@@ -66,7 +67,8 @@ jobs:
 
   docker-test:
     needs: [docker-build, initialize_worker]
-    runs-on: runpod
+    runs-on: self-hosted
+    labels: [runpod]  # Use the same custom worker
 
     steps:
       - name: Checkout Code
