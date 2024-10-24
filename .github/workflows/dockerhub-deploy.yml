@@ -95,7 +95,7 @@ jobs:
 
   terminate_runner:
     if: always()
-    needs: [run_tests, initialize_runner]
+    needs: [docker-build, docker-test, initialize_runner]
     runs-on: ubuntu-latest
 
     steps:
