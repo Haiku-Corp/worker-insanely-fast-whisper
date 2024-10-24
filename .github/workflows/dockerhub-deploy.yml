@@ -38,7 +38,7 @@ jobs:
 
   docker-build:
     needs: initialize_runner
-    runs-on: [self-hosted, runpod]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Code
@@ -65,7 +65,7 @@ jobs:
 
   docker-test:
     needs: [docker-build, initialize_runner]
-    runs-on: [self-hosted, runpod]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Code
