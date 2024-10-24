@@ -37,7 +37,7 @@ jobs:
           echo "::set-output name=runpod_job_id::$ID"
 
   docker-build:
-    needs: initialize_worker
+    needs: initialize_runner
     runs-on: [self-hosted, runpod]  # Corrected to include the label directly in runs-on
 
     steps:
@@ -64,7 +64,7 @@ jobs:
           tags: ${{ vars.DOCKERHUB_REPO }}/${{ vars.DOCKERHUB_IMG }}:${{ (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag) || 'dev' }}
 
   docker-test:
-    needs: [docker-build, initialize_worker]
+    needs: [docker-build, initialize_runner]
     runs-on: [self-hosted, runpod]  # Corrected to include the label directly in runs-on
 
     steps:
