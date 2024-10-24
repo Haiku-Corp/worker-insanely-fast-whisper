@@ -14,8 +14,32 @@ on:
         default: "dev"
 
 jobs:
-  docker-build:
+  initialize_worker:
     runs-on: ubuntu-latest
+    outputs:
+      runpod_job_id: ${{ steps.extract_id.outputs.runpod_job_id }}
+
+    steps:
+      - name: Deploy Worker
+        id: deploy
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/run"
+          method: "POST"
+          customHeaders: '{"Content-Type": "application/json"}'
+          bearerToken: ${{ secrets.RUNPOD_API_KEY }}
+          data: '{"input":{"github_pat": "${{ secrets.GH_PAT }}", "github_org":"${{ github.repository_owner }}", "docker_image": "your-docker-image:latest"}}'
+
+      - name: Extract Job ID
+        id: extract_id
+        run: |
+          ID=$(echo '${{ steps.deploy.outputs.response }}' | jq -r '.id')
+          echo "runpod_job_id=$ID" >> $GITHUB_ENV
+
+  docker-build:
+    needs: initialize_worker
+    runs-on: self-hosted
+    labels: [runpod]  # Ensure the worker is identified with this label
 
     steps:
       - name: Checkout Code
@@ -42,8 +66,9 @@ jobs:
           tags: ${{ vars.DOCKERHUB_REPO }}/${{ vars.DOCKERHUB_IMG }}:${{ (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag) || 'dev' }}
 
   docker-test:
-    needs: docker-build
-    runs-on: ubuntu-latest
+    needs: [docker-build, initialize_worker]
+    runs-on: self-hosted
+    labels: [runpod]  # Use the same custom worker
 
     steps:
       - name: Checkout Code
@@ -70,3 +95,33 @@ jobs:
           if [ "$TOTAL_TESTS" != "$SUCCESSFUL_TESTS" ]; then
               exit 1
           fi
+
+  terminate_worker:
+    if: always()
+    needs: [docker-build, docker-test, initialize_worker]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get Job Status
+        id: get_status
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/status/${{ env.runpod_job_id }}"
+          method: "GET"
+          customHeaders: '{"Content-Type": "application/json"}'
+          bearerToken: ${{ secrets.RUNPOD_API_KEY }}
+
+      - name: Parse Status
+        id: parse_status
+        run: |
+          STATUS=$(echo '${{ steps.get_status.outputs.response }}' | jq -r '.status')
+          echo "status=$STATUS" >> $GITHUB_ENV
+
+      - name: Shutdown Worker
+        if: ${{ env.status != 'COMPLETED' }}
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://api.runpod.ai/v2/${{ vars.RUNPOD_ENDPOINT }}/cancel/${{ env.runpod_job_id }}"
+          method: "POST"
+          customHeaders: '{"Content-Type": "application/json"}'
+          bearerToken: ${{ secrets.RUNPOD_API_KEY }}
